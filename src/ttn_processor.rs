@@ -91,3 +91,28 @@ pub fn process_pdf_with_settings(
 
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn writes_ini_with_all_fields_and_empty_values() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("ttn_ini_test_{}.ini", std::process::id()));
+
+        let mut values = HashMap::new();
+        values.insert("Автомобиль".to_string(), "BMW X5 A123BC".to_string());
+        values.insert("Отпуск разрешил".to_string(), String::new());
+
+        write_settings_ini(&values, &path).unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        assert!(content.starts_with("[fields]\n"));
+        assert!(content.contains("Автомобиль = \"BMW X5 A123BC\""));
+        assert!(content.contains("Отпуск разрешил = \"\""));
+        // Поля без значения из карты пишутся пустыми.
+        assert!(content.contains("Водитель = \"\""));
+    }
+}

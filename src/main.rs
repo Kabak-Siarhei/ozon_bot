@@ -48,8 +48,9 @@ enum Command {
     Cancel,
 }
 
-/// Минималистичный логгер в stderr: без него сообщения teloxide (`log::…`)
-/// теряются, и причина падения/ретраев в логах Render не видна.
+/// Минималистичный логгер: без него сообщения teloxide (`log::…`) теряются,
+/// и причина падения/ретраев в логах Render не видна.
+/// Пишем в **stdout** — в логах Render.stdout виден гарантированно.
 struct StdLogger;
 
 impl log::Log for StdLogger {
@@ -59,7 +60,7 @@ impl log::Log for StdLogger {
 
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
-            eprintln!("[{}] {}: {}", record.level(), record.target(), record.args());
+            println!("[{}] {}: {}", record.level(), record.target(), record.args());
         }
     }
 
@@ -70,6 +71,19 @@ fn init_logger() {
     static LOGGER: StdLogger = StdLogger;
     let _ = log::set_logger(&LOGGER);
     log::set_max_level(log::LevelFilter::Info);
+}
+
+/// Служебная строка диагностики — только stdout (надёжно попадает в логи).
+fn diag(msg: &str) {
+    println!("{msg}");
+}
+
+/// Фатальная ошибка: в оба потока (чтобы не потерять ни при каком
+/// перехвате stderr) и выход с кодом 1.
+fn fatal(msg: &str) -> ! {
+    println!("{msg}");
+    eprintln!("{msg}");
+    std::process::exit(1)
 }
 
 /// Токен в логах не показываем целиком — только начало для сверки.
@@ -84,32 +98,28 @@ async fn main() {
     init_logger();
 
     dotenv().ok();
-    eprintln!(
+    diag(&format!(
         "старт: cwd={:?}, BOT_DB={:?}",
         std::env::current_dir().unwrap_or_default(),
         std::env::var("BOT_DB").unwrap_or_default()
-    );
+    ));
 
     // Токен: TELEGRAM_BOT_TOKEN (наш .env) либо TELOXIDE_TOKEN (стандарт teloxide).
     let token = std::env::var("TELEGRAM_BOT_TOKEN")
         .or_else(|_| std::env::var("TELOXIDE_TOKEN"));
     let token = match token {
         Ok(t) if !t.trim().is_empty() => t,
-        _ => {
-            eprintln!("❌ Не задан TELEGRAM_BOT_TOKEN (ни в окружении, ни в .env).");
-            eprintln!("   На Render: сервис → Environment → добавьте TELEGRAM_BOT_TOKEN.");
-            std::process::exit(1);
-        }
+        _ => fatal(
+            "❌ Не задан TELEGRAM_BOT_TOKEN (ни в окружении, ни в .env).\n\
+             \x20  На Render: сервис → Environment → добавьте TELEGRAM_BOT_TOKEN.",
+        ),
     };
-    eprintln!("токен: {}", mask_token(&token));
+    diag(&format!("токен: {}", mask_token(&token)));
 
     let db_path = std::env::var("BOT_DB").unwrap_or_else(|_| "bot_settings.db".to_string());
     let db: DbHandle = match Db::open(&db_path) {
         Ok(db) => Arc::new(db),
-        Err(e) => {
-            eprintln!("❌ Не удалось открыть базу настроек '{db_path}': {e}");
-            std::process::exit(1);
-        }
+        Err(e) => fatal(&format!("❌ Не удалось открыть базу настроек '{db_path}': {e}")),
     };
 
     let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
@@ -119,26 +129,25 @@ async fn main() {
     // Предварительная проверка: токен валиден и api.telegram.org достижим.
     // Именно здесь падает большинство «тихих» деплоев — поэтому сообщаем явно.
     match bot.get_me().send().await {
-        Ok(me) => eprintln!("✅ Telegram API доступен, бот: @{}", me.username()),
-        Err(e) => {
-            eprintln!("❌ getMe не прошёл: {e}");
-            eprintln!("   Причины: неверный TELEGRAM_BOT_TOKEN либо нет доступа к api.telegram.org.");
-            std::process::exit(1);
-        }
+        Ok(me) => diag(&format!("✅ Telegram API доступен, бот: @{}", me.username())),
+        Err(e) => fatal(&format!(
+            "❌ getMe не прошёл: {e}\n\
+             \x20  Причины: неверный TELEGRAM_BOT_TOKEN либо нет доступа к api.telegram.org."
+        )),
     }
 
     let handler = dptree::entry()
         .branch(Update::filter_message().endpoint(handle_message))
         .branch(Update::filter_callback_query().endpoint(handle_callback));
 
-    println!("Бот запущен (база: {db_path}).");
+    diag(&format!("Бот запущен (база: {db_path})."));
     Dispatcher::builder(bot, handler)
         .dependencies(dptree::deps![db, pending])
         .enable_ctrlc_handler()
         .build()
         .dispatch()
         .await;
-    eprintln!("Dispatcher остановлен — выход.");
+    diag("Dispatcher остановлен — выход.");
 }
 
 // ---------------------------------------------------------------------------

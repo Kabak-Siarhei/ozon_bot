@@ -43,4 +43,11 @@ ENV BOT_DB=/tmp/bot_settings.db
 # TELEGRAM_BOT_TOKEN задаётся в дашборде Render (см. render.yaml).
 
 USER app
-CMD ["ozon_bot"]
+
+# Обёртка — детектор диагностики:
+#  * строка "[wrapper]" в логах означает, что контейнер реально выполнил
+#    команду и stdout доходит до логов Render;
+#  * её отсутствие при "Application exited early" = падение на уровне
+#    запуска (путь/команда), а не внутри бота;
+#  * `exec` передаёт сигналы (SIGTERM при рестарте) самому боту.
+CMD ["/bin/sh", "-c", "echo \"[wrapper] запуск ozon_bot, PATH=$PATH\"; exec /usr/local/bin/ozon_bot"]

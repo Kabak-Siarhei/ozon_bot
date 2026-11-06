@@ -29,9 +29,8 @@
  *   pdf_new_int / pdf_new_real            — создать целое / вещественное.
  *   pdf_new_rect                          — создать PDF-объект прямоугольника.
  *   pdf_add_object_drop                   — добавить объект в документ (xref).
- *   pdf_sync_page                         — синхронизировать аннотации со страницей.
  *   pdf_drop_widget                       — уменьшить refcount виджета.
- *   pdf_drop_page / pdf_drop_obj          — освободить страницу / объект.
+ *   fz_drop_page / pdf_drop_obj           — освободить страницу / объект.
  *   pdf_save_document                     — сохранить документ в файл.
  *
  * Сборка (пример, macOS/ARM, пути к PyMuPDF-venv):
@@ -341,8 +340,6 @@ static void add_text_field(fz_context *ctx, pdf_document *doc,
             pdf_dict_puts_drop(ctx, annot_dict, "Rect", rect_obj);
         }
 
-        pdf_sync_page(ctx, page);
-
         pdf_array_push_drop(ctx, fields_arr, pdf_keep_obj(ctx, annot_dict));
 
         pdf_dict_put_bool(ctx, acroform, pdf_new_name(ctx, "NeedAppearances"), 1);
@@ -418,7 +415,7 @@ int process_pdf_file(const char *in_path, const char *out_path,
         result = EXIT_FAILURE;
     }
 
-    if (page)     pdf_drop_page(ctx, page);
+    if (page)     fz_drop_page(ctx, (fz_page *)page);
     if (doc)      pdf_drop_document(ctx, doc);
     if (ctx)      fz_drop_context(ctx);
 
@@ -459,7 +456,7 @@ int process_pdf_file_single(const char *in_path, const char *out_path,
         fprintf(stderr, "MuPDF error: %s\n", fz_caught_message(ctx));
     }
 
-    if (page)     pdf_drop_page(ctx, page);
+    if (page)     fz_drop_page(ctx, (fz_page *)page);
     if (doc)      pdf_drop_document(ctx, doc);
     if (ctx)      fz_drop_context(ctx);
 

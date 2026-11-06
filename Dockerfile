@@ -2,37 +2,34 @@
 # Сборка Telegram-бота ozon_bot для Render (runtime: Docker).
 # В образ включена C-утилита ttn_add_field (MuPDF) — без зависимостей от Python.
 
-# ---------- Этап 1: сборка MuPDF ----------
+# ---------- Этап 1: сборка MuPDF (статические библиотеки) ----------
 FROM debian:bookworm-slim AS mupdf-builder
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        build-essential cmake pkg-config wget ca-certificates \
-        zlib1g-dev libjpeg62-turbo-dev libfreetype6-dev libharfbuzz-dev \
-        libjbig2dec0-dev libopenjp2-7-dev libssl-dev liblcms2-dev \
+        build-essential pkg-config wget ca-certificates libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /tmp
-RUN wget -q https://github.com/ArtifexSoftware/mupdf/archive/refs/tags/mupdf-1.23.2.tar.gz \
-    && tar xzf mupdf-1.23.2.tar.gz \
-    && cd mupdf-mupdf-1.23.2 \
-    && make -j"$(nproc)" build=release prefix=/usr/local shared=yes mupdf \
-    && make install build=release prefix=/usr/local shared=yes
+# Собираем MuPDF с встроенными thirdparty-зависимостями (без X11/GLUT).
+# Результат: libmupdf.a + libmupdf-third.a в /usr/local/lib.
+RUN wget -q https://github.com/ArtifexSoftware/mupdf/archive/refs/tags/1.23.2.tar.gz \
+    && tar xzf 1.23.2.tar.gz \
+    && cd mupdf-1.23.2 \
+    && make -j"$(nproc)" build=release HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no mupdf \
+    && make install build=release prefix=/usr/local
 
 # ---------- Этап 2: сборка Rust-бота и C-утилиты ----------
 FROM rust:1-slim-bookworm AS builder
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        pkg-config libssl-dev \
-        build-essential zlib1g-dev libjpeg62-turbo-dev libfreetype6-dev \
-        libharfbuzz-dev libjbig2dec0-dev libopenjp2-7-dev liblcms2-dev \
+        pkg-config libssl-dev build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Заголовки и библиотека MuPDF из первого этапа
+# Статические библиотеки MuPDF (заголовки + .a)
 COPY --from=mupdf-builder /usr/local/include /usr/local/include
 COPY --from=mupdf-builder /usr/local/lib /usr/local/lib
-RUN ldconfig
 
 WORKDIR /app
 
@@ -52,26 +49,23 @@ RUN cargo build --release --locked \
     --config 'profile.release.lto="off"' \
     --config 'profile.release.codegen-units=16'
 
-# C-утилита ttn_add_field (MuPDF, без Python)
-COPY ttn_add_field.c ttn_config.c ttn_config.h Makefile.c_ttn ./
+# C-утилита ttn_add_field (MuPDF, без Python).
+# Статическая линковка (libmupdf.a + libmupdf-third.a) — в runtime-образ
+# не нужно тащить библиотеки MuPDF и их зависимости.
+COPY ttn_add_field.c ttn_config.c ttn_config.h ./
 RUN cc -std=c11 -Wall -Wextra -O2 -I/usr/local/include \
        -o ttn_add_field ttn_add_field.c ttn_config.c \
-       -L/usr/local/lib -lmupdf -lm -lz
+       -L/usr/local/lib -lmupdf -lmupdf-third \
+       -static -lm -lpthread -ldl \
+    && test -x ttn_add_field
 
 # ---------- Этап 3: исполнение ----------
 FROM debian:bookworm-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        ca-certificates libssl3 \
-        zlib1g libjpeg62-turbo libfreetype6 libharfbuzz0b \
-        libjbig2dec0 libopenjp2-7 liblcms2-2 \
+    && apt-get install -y --no-install-recommends ca-certificates libssl3 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --create-home --uid 1001 app
-
-# Разделяемая библиотека MuPDF
-COPY --from=mupdf-builder /usr/local/lib/libmupdf*.so* /usr/local/lib/
-RUN ldconfig
 
 WORKDIR /app
 COPY --from=builder /app/target/release/ozon_bot /usr/local/bin/ozon_bot

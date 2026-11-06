@@ -48,9 +48,47 @@ enum Command {
     Cancel,
 }
 
+/// Минималистичный логгер в stderr: без него сообщения teloxide (`log::…`)
+/// теряются, и причина падения/ретраев в логах Render не видна.
+struct StdLogger;
+
+impl log::Log for StdLogger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::Level::Info
+    }
+
+    fn log(&self, record: &log::Record) {
+        if self.enabled(record.metadata()) {
+            eprintln!("[{}] {}: {}", record.level(), record.target(), record.args());
+        }
+    }
+
+    fn flush(&self) {}
+}
+
+fn init_logger() {
+    static LOGGER: StdLogger = StdLogger;
+    let _ = log::set_logger(&LOGGER);
+    log::set_max_level(log::LevelFilter::Info);
+}
+
+/// Токен в логах не показываем целиком — только начало для сверки.
+fn mask_token(token: &str) -> String {
+    let head: String = token.chars().take(8).collect();
+    format!("{head}… ({} символов)", token.chars().count())
+}
+
 #[tokio::main]
 async fn main() {
+    // Логгер — до всего остального, чтобы ошибки teloxide были видны.
+    init_logger();
+
     dotenv().ok();
+    eprintln!(
+        "старт: cwd={:?}, BOT_DB={:?}",
+        std::env::current_dir().unwrap_or_default(),
+        std::env::var("BOT_DB").unwrap_or_default()
+    );
 
     // Токен: TELEGRAM_BOT_TOKEN (наш .env) либо TELOXIDE_TOKEN (стандарт teloxide).
     let token = std::env::var("TELEGRAM_BOT_TOKEN")
@@ -58,17 +96,36 @@ async fn main() {
     let token = match token {
         Ok(t) if !t.trim().is_empty() => t,
         _ => {
-            eprintln!("Не задан TELEGRAM_BOT_TOKEN.");
-            eprintln!("Скопируйте .env.example в .env и впишите токен от @BotFather.");
+            eprintln!("❌ Не задан TELEGRAM_BOT_TOKEN (ни в окружении, ни в .env).");
+            eprintln!("   На Render: сервис → Environment → добавьте TELEGRAM_BOT_TOKEN.");
+            std::process::exit(1);
+        }
+    };
+    eprintln!("токен: {}", mask_token(&token));
+
+    let db_path = std::env::var("BOT_DB").unwrap_or_else(|_| "bot_settings.db".to_string());
+    let db: DbHandle = match Db::open(&db_path) {
+        Ok(db) => Arc::new(db),
+        Err(e) => {
+            eprintln!("❌ Не удалось открыть базу настроек '{db_path}': {e}");
             std::process::exit(1);
         }
     };
 
-    let db_path = std::env::var("BOT_DB").unwrap_or_else(|_| "bot_settings.db".to_string());
-    let db: DbHandle = Arc::new(Db::open(&db_path).expect("не удалось открыть базу настроек"));
     let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
 
     let bot = Bot::new(token);
+
+    // Предварительная проверка: токен валиден и api.telegram.org достижим.
+    // Именно здесь падает большинство «тихих» деплоев — поэтому сообщаем явно.
+    match bot.get_me().send().await {
+        Ok(me) => eprintln!("✅ Telegram API доступен, бот: @{}", me.username()),
+        Err(e) => {
+            eprintln!("❌ getMe не прошёл: {e}");
+            eprintln!("   Причины: неверный TELEGRAM_BOT_TOKEN либо нет доступа к api.telegram.org.");
+            std::process::exit(1);
+        }
+    }
 
     let handler = dptree::entry()
         .branch(Update::filter_message().endpoint(handle_message))
@@ -81,6 +138,7 @@ async fn main() {
         .build()
         .dispatch()
         .await;
+    eprintln!("Dispatcher остановлен — выход.");
 }
 
 // ---------------------------------------------------------------------------

@@ -8,7 +8,7 @@ log = "0.4"
 teloxide = { version = "0.17", features = ["macros"] }
 lopdf = "0.40.0"
 phf = { version = "0.11", features = ["macros"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "net"] }
 rusqlite = { version = "0.41", features = ["bundled"] }
 dotenvy = "0.15"
 anyhow = "1.0"

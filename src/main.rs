@@ -95,12 +95,62 @@ fn mask_token(token: &str) -> String {
     format!("{head}… ({} символов)", token.chars().count())
 }
 
+/// Лёгкий HTTP health-сервер для Render Web Service.
+///
+/// Render сканирует порт и убивает инстанс, если никто его не слушает.
+/// Для Background Worker переменная PORT не задаётся — сервер не стартует.
+/// Никаких новых зависимостей: только tokio.
+fn spawn_health_server() {
+    let Ok(port_str) = env::var("PORT") else {
+        return;
+    };
+    let Ok(port) = port_str.parse::<u16>() else {
+        eprintln!("health: некорректный PORT={port_str:?}, сервер не запущен");
+        return;
+    };
+
+    tokio::spawn(async move {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = match tokio::net::TcpListener::bind(("0.0.0.0", port)).await {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("health: не удалось занять порт {port}: {e}");
+                return;
+            }
+        };
+        eprintln!("health: слушаю 0.0.0.0:{port} (GET / -> 200 ok)");
+
+        loop {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                continue;
+            };
+            tokio::spawn(async move {
+                let mut buf = [0u8; 1024];
+                let _ = socket.read(&mut buf).await;
+                let body = b"ok";
+                let mut resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                )
+                .into_bytes();
+                resp.extend_from_slice(body);
+                let _ = socket.write_all(&resp).await;
+                let _ = socket.shutdown().await;
+            });
+        }
+    });
+}
+
 #[tokio::main]
 async fn main() {
     // Логгер — до всего остального, чтобы ошибки teloxide были видны.
     init_logger();
 
     dotenv().ok();
+
+    // Render Web Service требует открытый порт; Background Worker — нет.
+    spawn_health_server();
     diag(&format!(
         "старт: cwd={:?}, BOT_DB={:?}",
         std::env::current_dir().unwrap_or_default(),

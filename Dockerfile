@@ -7,17 +7,18 @@ FROM debian:bookworm-slim AS mupdf-builder
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        build-essential pkg-config wget ca-certificates libssl-dev \
+        build-essential pkg-config wget ca-certificates libssl-dev zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /tmp
 # Собираем MuPDF с встроенными thirdparty-зависимостями (без X11/GLUT).
 # Результат: libmupdf.a + libmupdf-third.a в /usr/local/lib.
-RUN wget -q https://github.com/ArtifexSoftware/mupdf/archive/refs/tags/1.23.2.tar.gz \
-    && tar xzf 1.23.2.tar.gz \
-    && cd mupdf-1.23.2 \
-    && make -j"$(nproc)" build=release HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no mupdf \
-    && make install build=release prefix=/usr/local
+RUN wget -q https://mupdf.com/downloads/archive/mupdf-1.23.2-source.tar.gz \
+    && tar xzf mupdf-1.23.2-source.tar.gz \
+    && cd mupdf-1.23.2-source \
+    && make -j"$(nproc)" build=release HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no USE_SYSTEM_ZLIB=yes libs \
+    && make build=release HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no USE_SYSTEM_ZLIB=yes \
+            prefix=/usr/local install-libs
 
 # ---------- Этап 2: сборка Rust-бота и C-утилиты ----------
 FROM rust:1-slim-bookworm AS builder
@@ -56,7 +57,7 @@ COPY ttn_add_field.c ttn_config.c ttn_config.h ./
 RUN cc -std=c11 -Wall -Wextra -O2 -I/usr/local/include \
        -o ttn_add_field ttn_add_field.c ttn_config.c \
        -L/usr/local/lib -lmupdf -lmupdf-third \
-       -static -lm -lpthread -ldl \
+       -static -lm -lpthread -ldl -lz -lcrypto \
     && test -x ttn_add_field
 
 # ---------- Этап 3: исполнение ----------

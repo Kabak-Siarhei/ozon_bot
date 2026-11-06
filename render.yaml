@@ -1,0 +1,18 @@
+# Blueprint Render: Telegram-бот как Background Worker.
+# Worker, а не web service: бот работает через long polling (исходящие
+# запросы к api.telegram.com) и не принимает входящий HTTP-трафик.
+# Web service на free-плане засыпал бы после ~10 минут простоя.
+services:
+  - type: worker
+    name: ozon-ttn-bot
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      # Токен от @BotFather — вводится в дашборде Render, не хранится в репо.
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      # Настройки полей (SQLite) — эфемерный диск: сбрасываются при рестарте.
+      - key: BOT_DB
+        value: /tmp/bot_settings.db

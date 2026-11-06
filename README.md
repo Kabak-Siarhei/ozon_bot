@@ -34,6 +34,49 @@ Telegram-бот — клон веб-сервера `ozon`: обрабатыва�
 
 Настройки хранятся в SQLite (`bot_settings.db`), отдельно для каждого чата.
 
+## Тесты
+
+```bash
+cargo test
+```
+
+Покрывают логику PDF (5 полей, дефолты, кастомные значения, очистка)
+и базу настроек (CRUD, изоляция по чатам) —7 тестов.
+
+## Деплой на Render (free)
+
+Проект готов к Render: есть `Dockerfile` и `render.yaml` (blueprint).
+
+1. Залейте репозиторий на GitHub.
+2. В Render: **New → Background Worker** → подключите репозиторий.
+   Имено **Worker**, а не Web Service: бот работает через long polling
+   (исходящие запросы), а Web Service на free засыпал бы после простоя.
+3. Render подхватит `render.yaml` (runtime Docker, plan free).
+4. В **Environment** впишите `TELEGRAM_BOT_TOKEN` (в yaml он помечен
+   `sync: false`, в репозитории его нет).
+5. **Deploy** — в логах появится «Бот запущен (база: /tmp/bot_settings.db)».
+
+Проверка локальной сборки образа (если есть Docker):
+
+```bash
+docker build -t ozon_bot .
+docker run --rm -e TELEGRAM_BOT_TOKEN=... ozon_bot
+```
+
+### Нюансы free-плана
+
+- **Настройки полей эфемерны**: база лежит в `/tmp` и стирается при каждом
+  рестарте/деплое — persistent disks на free недоступны. После деплоя
+  заново задайте значения через `/settings`.
+- **Сборка**: LTO в Dockerfile отключён (`--config profile.release.lto="off"`),
+  иначе релиз с LTO собирается очень долго и может упереться в лимиты
+  free-сборки.
+- **Сигналы**: при деплое Render шлёт SIGTERM — процесс завершается,
+  неподтверждённые обновления Telegram доставит заново при старте.
+- Если в вашем аккаунте недоступен тип Worker — альтернатива: развернуть
+  как Web Service и держать его живым внешним пингером health-endpoint'а
+  каждые 5 минут (на free он засыпает без входящих запросов).
+
 ## Ограничения
 
 - Скачивание файлов Telegram Bot API — до 20 МБ.

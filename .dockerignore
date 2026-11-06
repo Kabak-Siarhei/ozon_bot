@@ -1,0 +1,6 @@
+target
+.env
+*.db
+.git
+.DS_Store
+README.md

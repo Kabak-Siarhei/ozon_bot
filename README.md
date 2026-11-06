@@ -81,3 +81,55 @@ docker run --rm -e TELEGRAM_BOT_TOKEN=... ozon_bot
 
 - Скачивание файлов Telegram Bot API — до 20 МБ.
 - Обрабатывается первая страница документа.
+
+## Обработка PDF через C-утилиту (MuPDF)
+
+Начиная с этой версии PDF обрабатывается внешней утилитой `ttn_add_field`
+на чистом Си (MuPDF), а не встроенным Rust-кодом. Это не меняет интерфейс
+бота: `/settings` и отправка PDF работают как раньше.
+
+Как это устроено:
+
+1. Бот скачивает присланный PDF во временный файл в `/tmp`.
+2. Берёт настройки полей **текущего пользователя** из SQLite (`chat_id`).
+3. Пишет временный `ttn_settings_<chat_id>.ini`.
+4. Запускает `ttn_add_field in.pdf out.pdf -c ttn_settings_<chat_id>.ini`.
+5. Отправляет пользователю `processed_<имя>.pdf` и удаляет временные файлы.
+
+Путь к бинарнику задаётся переменной окружения `TTN_BIN_PATH`
+(по умолчанию `./ttn_add_field`; в Docker-образе — `/usr/local/bin/ttn_add_field`).
+
+### Локальная сборка C-утилиты
+
+Требуется установленный MuPDF (без Python). Например:
+
+```bash
+# Debian/Ubuntu
+sudo apt-get install libmupdf-dev
+make -f Makefile.c_ttn
+
+# macOS (Homebrew)
+brew install mupdf
+make -f Makefile.c_ttn \
+  MUPDF_INC="$(brew --prefix mupdf)/include" \
+  MUPDF_LIB="$(brew --prefix mupdf)/lib"
+```
+
+Проверка:
+
+```bash
+./ttn_add_field tests/fixtures/ttn.pdf /tmp/out.pdf -c settings.example.ini
+```
+
+### Файлы
+
+| Файл | Назначение |
+|------|------------|
+| `ttn_add_field.c` | CLI-утилита: добавляет поля AcroForm в PDF через MuPDF |
+| `ttn_config.c/.h` | Парсер INI-конфигурации (`[fields]`) |
+| `Makefile.c_ttn` | Сборка C-утилиты |
+| `settings.example.ini` | Пример конфигурации полей |
+| `src/ttn_processor.rs` | Генерация ini из SQLite и вызов C-утилиты |
+| `README_C_TTN.md` | Подробная документация по C-утилите |
+
+Docker-образ (см. `Dockerfile`) собирает MuPDF и `ttn_add_field` автоматически.

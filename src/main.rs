@@ -5,9 +5,12 @@
 
 mod db;
 mod pdf;
+mod ttn_processor;
 
 use std::collections::HashMap;
+use std::env;
 use std::error::Error;
+use std::fs;
 use std::sync::{Arc, Mutex};
 
 use dotenvy::dotenv;
@@ -236,28 +239,46 @@ async fn handle_message(
             return Ok(());
         }
 
-        let status = bot.send_message(chat, "⏳ Обрабатываю PDF…").await?;
+        let status_msg = bot.send_message(chat, "⏳ Обрабатываю PDF…").await?;
 
         let file = bot.get_file(document.file.id.clone()).await?;
-        let mut input: Vec<u8> = Vec::new();
-        bot.download_file(&file.path, &mut input).await?;
+        let mut input_bytes: Vec<u8> = Vec::new();
+        bot.download_file(&file.path, &mut input_bytes).await?;
 
-        let values = db.values(chat_id);
-        match pdf::process_pdf(&input, &values) {
-            Ok(out) => {
-                let name = match document.file_name.as_deref() {
-                    Some(n) => format!("processed_{n}"),
-                    None => "processed.pdf".to_string(),
-                };
-                bot.send_document(chat, InputFile::memory(out).file_name(name))
+        // Временные файлы (имя с chat_id, чтобы не было коллизий между пользователями)
+        let tmp_dir = env::temp_dir();
+        let input_name = document.file_name.as_deref().unwrap_or("document.pdf");
+        let safe_name = input_name.replace('/', "_").replace('\\', "_");
+        let input_path = tmp_dir.join(format!("ttn_in_{}_{}", chat_id, safe_name));
+        let output_path = tmp_dir.join(format!("ttn_out_{}_{}", chat_id, safe_name));
+
+        fs::write(&input_path, &input_bytes)?;
+
+        // Обрабатываем через C-утилиту ttn_add_field с настройками пользователя
+        let result = ttn_processor::process_pdf_with_settings(
+            chat_id,
+            &db,
+            &input_path,
+            &output_path,
+            &tmp_dir,
+        );
+
+        // Удаляем входной временный файл
+        let _ = fs::remove_file(&input_path);
+
+        match result {
+            Ok(()) => {
+                let name = format!("processed_{safe_name}");
+                let out_bytes = fs::read(&output_path)?;
+                bot.send_document(chat, InputFile::memory(out_bytes).file_name(name))
                     .caption("✅ Поля добавлены")
                     .await?;
-                let _ = bot.edit_message_text(chat, status.id, "✅ Готово").await;
+                let _ = bot.edit_message_text(chat, status_msg.id, "✅ Готово").await;
+                let _ = fs::remove_file(&output_path);
             }
             Err(e) => {
-                // Форматируем до await: текст сообщения не должен зависеть от `e`.
                 let text = format!("❌ Ошибка обработки: {e}");
-                let _ = bot.edit_message_text(chat, status.id, text).await;
+                let _ = bot.edit_message_text(chat, status_msg.id, text).await;
             }
         }
         return Ok(());

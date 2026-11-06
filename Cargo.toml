@@ -1,0 +1,12 @@
+[package]
+name = "ozon_bot"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+teloxide = { version = "0.17", features = ["macros"] }
+lopdf = "0.40.0"
+phf = { version = "0.11", features = ["macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
+dotenvy = "0.15"

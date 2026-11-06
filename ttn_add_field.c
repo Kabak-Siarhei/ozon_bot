@@ -68,18 +68,11 @@
 #include <mupdf/pdf/form.h>
 
 #include "ttn_config.h"
+#include "ttn_add_field.h"
 
 /* -------------------------------------------------------------------------- */
-/* Константы полей ТТН (аналог Rust KEYWORD_PARAMS)                           */
+/* Константы полей ТТН                                                        */
 /* -------------------------------------------------------------------------- */
-
-typedef struct {
-    const char *name;  /* имя поля AcroForm (/T) */
-    float x;           /* левая координата (от левого края страницы) */
-    float y;           /* верхняя координата (от верхнего края страницы) */
-    float w;           /* ширина */
-    float h;           /* высота */
-} ttn_field_t;
 
 static const ttn_field_t TTF_FIELDS[] = {
     {"Автомобиль",              65.0f,  170.0f, 200.0f, 10.0f},
@@ -90,20 +83,21 @@ static const ttn_field_t TTF_FIELDS[] = {
 };
 #define NUM_TTF_FIELDS (sizeof(TTF_FIELDS) / sizeof(TTF_FIELDS[0]))
 
+const ttn_field_t *ttn_fields(size_t *count)
+{
+    if (count)
+        *count = NUM_TTF_FIELDS;
+    return TTF_FIELDS;
+}
+
 static const char *DA_STRING = "/Helvetica 6 Tf 0 0 0 rg";
 
 /* -------------------------------------------------------------------------- */
 /* Вспомогательные функции                                                    */
 /* -------------------------------------------------------------------------- */
 
-static void die(const char *msg)
-{
-    fprintf(stderr, "ttn_add_field: %s\n", msg);
-    exit(EXIT_FAILURE);
-}
-
 /* Значение по умолчанию для поля (если пользователь не задал своё) */
-static const char *default_value(const char *field)
+const char *ttn_default_value(const char *field)
 {
     if (strcmp(field, "Отпуск разрешил") == 0 ||
         strcmp(field, "Сдал грузоотправитель") == 0)
@@ -186,11 +180,11 @@ static pdf_obj *get_or_create_acroform(fz_context *ctx, pdf_document *doc)
     fz_try(ctx) {
         trailer = pdf_trailer(ctx, doc);
         if (!trailer)
-            die("PDF trailer is missing");
+            fz_throw(ctx, FZ_ERROR_GENERIC, "PDF trailer is missing");
 
         root = pdf_dict_gets(ctx, trailer, "Root");
         if (!root)
-            die("PDF root (/Catalog) is missing");
+            fz_throw(ctx, FZ_ERROR_GENERIC, "PDF root (/Catalog) is missing");
 
         existing = pdf_dict_gets(ctx, root, "AcroForm");
         if (existing) {
@@ -260,7 +254,7 @@ static const char *resolve_value(const ttn_config_t *cfg, const char *field)
         if (v != NULL)
             return v;
     }
-    return default_value(field);
+    return ttn_default_value(field);
 }
 
 /*
@@ -391,8 +385,10 @@ int process_pdf_file(const char *in_path, const char *out_path,
     int result = EXIT_FAILURE;
 
     ctx = fz_new_context(NULL, NULL, FZ_STORE_DEFAULT);
-    if (!ctx)
-        die("cannot create fz_context");
+    if (!ctx) {
+        fprintf(stderr, "ttn: cannot create fz_context\n");
+        return EXIT_FAILURE;
+    }
 
     fz_register_document_handlers(ctx);
 
@@ -400,7 +396,7 @@ int process_pdf_file(const char *in_path, const char *out_path,
         doc = pdf_open_document(ctx, in_path);
         page = pdf_load_page(ctx, doc, 0);
         if (!page)
-            die("cannot load page 0");
+            fz_throw(ctx, FZ_ERROR_GENERIC, "cannot load page 0");
 
         page_height = get_page_height(ctx, page);
 
@@ -433,15 +429,17 @@ int process_pdf_file_single(const char *in_path, const char *out_path,
     int result = EXIT_FAILURE;
 
     ctx = fz_new_context(NULL, NULL, FZ_STORE_DEFAULT);
-    if (!ctx)
-        die("cannot create fz_context");
+    if (!ctx) {
+        fprintf(stderr, "ttn: cannot create fz_context\n");
+        return EXIT_FAILURE;
+    }
 
     fz_register_document_handlers(ctx);
 
     fz_try(ctx) {
         doc = pdf_open_document(ctx, in_path);
         page = pdf_load_page(ctx, doc, 0);
-        if (!page) die("cannot load page 0");
+        if (!page) fz_throw(ctx, FZ_ERROR_GENERIC, "cannot load page 0");
 
         page_height = get_page_height(ctx, page);
 
@@ -463,6 +461,7 @@ int process_pdf_file_single(const char *in_path, const char *out_path,
     return result;
 }
 
+#ifndef TTN_NO_MAIN
 /* -------------------------------------------------------------------------- */
 /* CLI                                                                        */
 /* -------------------------------------------------------------------------- */
@@ -564,3 +563,5 @@ int main(int argc, char **argv)
     return process_pdf_file(in_path, out_path,
                             cfg_ok ? &cfg : NULL);
 }
+
+#endif /* TTN_NO_MAIN */

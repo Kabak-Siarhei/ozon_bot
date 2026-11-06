@@ -1,4 +1,20 @@
+# Сборка C-версии
+*.o
+ozon_bot
+ttn_add_field
+test_core
+test_tg
+
+# Rust (старые артефакты, если остались)
 /target
+Cargo.lock
+
+# Данные и окружение
 .env
 *.db
+*.db-journal
+*.db-wal
+
+# Прочее
 .DS_Store
+*.log

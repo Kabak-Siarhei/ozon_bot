@@ -1,135 +1,145 @@
-# ozon_bot
+# ozon_bot (C)
 
-Telegram-бот — клон веб-сервера `ozon`: обрабатывает PDF-документы (ТТН)
-и добавляет AcroForm-поля с настраиваемыми значениями.
+Telegram-бот для заполнения PDF-документов ТТН. Полностью на **C11**:
 
-## Настройка
+- Telegram Bot API — long polling через **libcurl** + **cJSON**;
+- настройки полей — **SQLite** (per `chat_id`);
+- заполнение AcroForm — **MuPDF** (`ttn_add_field.c`);
+- один исполняемый файл, без Rust, Python и subprocess-вызовов.
 
-1. Получите токен у [@BotFather](https://t.me/BotFather).
-2. Скопируйте конфиг и впишите токен:
-   ```bash
-   cp .env.example .env
-   ```
-3. Запустите:
-   ```bash
-   cargo run
-   ```
+## Возможности
 
-## Команды
+- `/start` — справка.
+- `/settings` — меню из 5 полей ТТН с кнопками «изменить» и «✖ очистить».
+- Значения хранятся отдельно для каждого чата/пользователя.
+- Пользователь отправляет PDF — бот возвращает `processed_<имя>.pdf`
+  с заполненными полями.
+- Кириллица в значениях (UTF-16BE + BOM), поля AcroForm с корректным `/Rect`.
+- Если задан `PORT` (Render Web Service) — поднимается HTTP health-сервер
+  `GET / -> 200 ok`, чтобы проходил port scan. Для Background Worker порт
+  не нужен и сервер не стартует.
 
-| Команда     | Назначение                                        |
-|-------------|---------------------------------------------------|
-| `/start`    | Справка                                           |
-| `/settings` | Настройка значений полей (кнопками в чате)       |
-| `/cancel`   | Отменить ввод значения                            |
+## Архитектура
 
-Настраиваемые поля: **Автомобиль**, **Водитель**, **Отпуск разрешил**,
-**Сдал грузоотправитель**, **Товар к перевозке принял**.
-
-## Работа
-
-1. `/settings` → нажать поле → прислать новое значение текстом
-   (кнопка `✖` очищает значение).
-2. Отправить PDF-документ → бот вернёт тот же файл с заполненными полями.
-
-Настройки хранятся в SQLite (`bot_settings.db`), отдельно для каждого чата.
-
-## Тесты
-
-```bash
-cargo test
+```
+bot.c            long polling, команды, кнопки, приём/отправка PDF
+telegram.c/.h    Bot API: JSON-методы, multipart sendDocument, getFile/download
+db.c/.h          SQLite: settings (chat_id, field, value) + pending
+ui.c/.h          тексты и inline-клавиатура
+ttn_add_field.c/.h   заполнение AcroForm через MuPDF (+ CLI)
+ttn_config.c/.h  чтение INI (для CLI)
+cJSON.c/.h       вендоренный JSON-парсер (MIT)
 ```
 
-Покрывают логику PDF (5 полей, дефолты, кастомные значения, очистка)
-и базу настроек (CRUD, изоляция по чатам) —7 тестов.
+## Зависимости
 
-## Деплой на Render (free)
+- `libcurl` (TLS, multipart)
+- `sqlite3`
+- MuPDF (`libmupdf.a` + `libmupdf-third.a` или `libmupdf.dylib`)
+- `pkg-config`, компилятор C11
 
-Проект готов к Render: есть `Dockerfile` и `render.yaml` (blueprint).
+## Переменные окружения
 
-1. Залейте репозиторий на GitHub.
-2. В Render: **New → Background Worker** → подключите репозиторий.
-   Имено **Worker**, а не Web Service: бот работает через long polling
-   (исходящие запросы), а Web Service на free засыпал бы после простоя.
-3. Render подхватит `render.yaml` (runtime Docker, plan free).
-4. В **Environment** впишите `TELEGRAM_BOT_TOKEN` (в yaml он помечен
-   `sync: false`, в репозитории его нет).
-5. **Deploy** — в логах появится «Бот запущен (база: /tmp/bot_settings.db)».
+| Переменная | Назначение | По умолчанию |
+|------------|------------|--------------|
+| `TELEGRAM_BOT_TOKEN` | токен Bot API | обязателен (или `TELOXIDE_TOKEN`) |
+| `BOT_DB` | путь к SQLite | `bot_settings.db` |
+| `PORT` | если задан — включить health-сервер | не задан |
+| `TELEGRAM_API_BASE` | подмена API (тесты/локальный Bot API) | `https://api.telegram.org` |
 
-Проверка локальной сборки образа (если есть Docker):
+`.env` читается автоматически при наличии.
 
-```bash
-docker build -t ozon_bot .
-docker run --rm -e TELEGRAM_BOT_TOKEN=... ozon_bot
-```
+## Сборка
 
-### Нюансы free-плана
-
-- **Настройки полей эфемерны**: база лежит в `/tmp` и стирается при каждом
-  рестарте/деплое — persistent disks на free недоступны. После деплоя
-  заново задайте значения через `/settings`.
-- **Сборка**: LTO в Dockerfile отключён (`--config profile.release.lto="off"`),
-  иначе релиз с LTO собирается очень долго и может упереться в лимиты
-  free-сборки.
-- **Сигналы**: при деплое Render шлёт SIGTERM — процесс завершается,
-  неподтверждённые обновления Telegram доставит заново при старте.
-- Если в вашем аккаунте недоступен тип Worker — альтернатива: развернуть
-  как Web Service и держать его живым внешним пингером health-endpoint'а
-  каждые 5 минут (на free он засыпает без входящих запросов).
-
-## Ограничения
-
-- Скачивание файлов Telegram Bot API — до 20 МБ.
-- Обрабатывается первая страница документа.
-
-## Обработка PDF через C-утилиту (MuPDF)
-
-Начиная с этой версии PDF обрабатывается внешней утилитой `ttn_add_field`
-на чистом Си (MuPDF), а не встроенным Rust-кодом. Это не меняет интерфейс
-бота: `/settings` и отправка PDF работают как раньше.
-
-Как это устроено:
-
-1. Бот скачивает присланный PDF во временный файл в `/tmp`.
-2. Берёт настройки полей **текущего пользователя** из SQLite (`chat_id`).
-3. Пишет временный `ttn_settings_<chat_id>.ini`.
-4. Запускает `ttn_add_field in.pdf out.pdf -c ttn_settings_<chat_id>.ini`.
-5. Отправляет пользователю `processed_<имя>.pdf` и удаляет временные файлы.
-
-Путь к бинарнику задаётся переменной окружения `TTN_BIN_PATH`
-(по умолчанию `./ttn_add_field`; в Docker-образе — `/usr/local/bin/ttn_add_field`).
-
-### Локальная сборка C-утилиты
-
-Требуется установленный MuPDF (без Python). Например:
+### Linux (как в Docker)
 
 ```bash
 # Debian/Ubuntu
-sudo apt-get install libmupdf-dev
-make -f Makefile.c_ttn
+sudo apt-get install build-essential pkg-config \
+    libcurl4-openssl-dev libsqlite3-dev libssl-dev zlib1g-dev libmupdf-dev
 
-# macOS (Homebrew)
-brew install mupdf
-make -f Makefile.c_ttn \
-  MUPDF_INC="$(brew --prefix mupdf)/include" \
-  MUPDF_LIB="$(brew --prefix mupdf)/lib"
+make
 ```
 
-Проверка:
+Если MuPDF собран из исходников в `/usr/local`:
+
+```bash
+make MUPDF_INC=/usr/local/include MUPDF_LIB=/usr/local/lib
+```
+
+### macOS (локальный тест с MuPDF из PyMuPDF)
+
+```bash
+MUPDF_INC="$HOME/development/local-llm-pdf-ocr/.venv/lib/python3.12/site-packages/pymupdf/mupdf-devel/include"
+MUPDF_LIB="$HOME/development/local-llm-pdf-ocr/.venv/lib/python3.12/site-packages/pymupdf"
+
+make MUPDF_INC="$MUPDF_INC" MUPDF_LIB="$MUPDF_LIB" \
+     MUPDF_LIBS="$MUPDF_LIB/libmupdf.dylib" \
+     SYS_LIBS="-lpthread -lz" \
+     EXTRA_LIBS="-framework CoreGraphics -framework CoreText -framework CoreFoundation -undefined dynamic_lookup"
+
+DYLD_LIBRARY_PATH="$MUPDF_LIB" ./ozon_bot
+```
+
+## Запуск
+
+```bash
+export TELEGRAM_BOT_TOKEN="123456:ABC..."
+export BOT_DB="/tmp/bot_settings.db"
+./ozon_bot
+```
+
+CLI-версия для одного PDF (без Telegram):
 
 ```bash
 ./ttn_add_field tests/fixtures/ttn.pdf /tmp/out.pdf -c settings.example.ini
 ```
 
-### Файлы
+## Тесты
 
-| Файл | Назначение |
-|------|------------|
-| `ttn_add_field.c` | CLI-утилита: добавляет поля AcroForm в PDF через MuPDF |
-| `ttn_config.c/.h` | Парсер INI-конфигурации (`[fields]`) |
-| `Makefile.c_ttn` | Сборка C-утилиты |
-| `settings.example.ini` | Пример конфигурации полей |
-| `src/ttn_processor.rs` | Генерация ini из SQLite и вызов C-утилиты |
-| `README_C_TTN.md` | Подробная документация по C-утилите |
+```bash
+# SQLite + UI + заполнение PDF
+make test-core
 
-Docker-образ (см. `Dockerfile`) собирает MuPDF и `ttn_add_field` автоматически.
+# Telegram-клиент против mock Bot API
+make test-tg
+
+# Полный сценарий: кнопка -> ввод -> PDF -> sendDocument
+./tests/run_bot_test.sh
+```
+
+Для macOS перед тестами:
+
+```bash
+export DYLD_LIBRARY_PATH="$MUPDF_LIB"
+export PYTHON="$HOME/development/local-llm-pdf-ocr/.venv/bin/python3"  # нужен PyMuPDF для проверки
+export MUPDF_DYLIB_DIR="$MUPDF_LIB"
+```
+
+## Docker / Render
+
+```bash
+docker build -t ozon-ttn-bot .
+docker run --rm -e TELEGRAM_BOT_TOKEN="..." ozon-ttn-bot
+```
+
+`Dockerfile` собирает MuPDF из официального source-tarball (static),
+затем C-бота; runtime содержит только `libcurl4`, `libsqlite3-0`,
+`libssl3`, `zlib1g`, `libstdc++6`.
+
+`render.yaml` описывает Background Worker. Если сервис создан как
+**Web Service**, health-сервер автоматически слушает `PORT`; но на free-плане
+web service засыпает без входящего трафика — нужен внешний пинг или Worker.
+
+## Ограничения
+
+- `getFile` Bot API — до 20 МБ (проверяется до скачивания).
+- Отправка документа — до 50 МБ.
+- SQLite на Render эфемерна (`/tmp`): настройки сбрасываются при рестарте.
+  Для постоянного хранения подключите диск или внешнюю БД.
+
+## Serverless-вариант
+
+В соседней папке `../tg_serverless` лежит версия для Telegram Serverless
+(JavaScript + pdf-lib), если Telegram включит доступ. Она не использует C/MuPDF
+и деплоится через `tgcloud`.

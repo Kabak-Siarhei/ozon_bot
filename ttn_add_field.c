@@ -177,6 +177,9 @@ static pdf_obj *get_or_create_acroform(fz_context *ctx, pdf_document *doc)
     pdf_obj *acroform = NULL;
     pdf_obj *fields_arr = NULL;
 
+    fz_var(acroform);
+    fz_var(fields_arr);
+
     fz_try(ctx) {
         trailer = pdf_trailer(ctx, doc);
         if (!trailer)
@@ -282,6 +285,13 @@ static void add_text_field(fz_context *ctx, pdf_document *doc,
     float urx = x1;
     float ury = page_height - y1;
 
+    fz_var(acroform);
+    fz_var(fields_arr);
+    fz_var(page_annots);
+    fz_var(widget);
+    fz_var(v_obj);
+    fz_var(utf16_buf);
+
     fz_try(ctx) {
         acroform = get_or_create_acroform(ctx, doc);
 
@@ -384,6 +394,11 @@ int process_pdf_file(const char *in_path, const char *out_path,
     float page_height = 0.0f;
     int result = EXIT_FAILURE;
 
+    fz_var(doc);
+    fz_var(page);
+    fz_var(page_height);
+    fz_var(result);
+
     ctx = fz_new_context(NULL, NULL, FZ_STORE_DEFAULT);
     if (!ctx) {
         fprintf(stderr, "ttn: cannot create fz_context\n");
@@ -427,6 +442,11 @@ int process_pdf_file_single(const char *in_path, const char *out_path,
     pdf_page *page = NULL;
     float page_height = 0.0f;
     int result = EXIT_FAILURE;
+
+    fz_var(doc);
+    fz_var(page);
+    fz_var(page_height);
+    fz_var(result);
 
     ctx = fz_new_context(NULL, NULL, FZ_STORE_DEFAULT);
     if (!ctx) {

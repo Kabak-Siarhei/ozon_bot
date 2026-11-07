@@ -56,11 +56,12 @@ import sqlite3
 import fitz
 
 db = sqlite3.connect(os.environ["BOT_DB"])
-value = db.execute(
-    "SELECT value FROM settings WHERE chat_id=42 AND field='Автомобиль'"
-).fetchone()
-assert value and value[0] == "BMW X5 A123BC", value
-print("ok: settings saved to SQLite")
+for field in ("Водитель", "Товар к перевозке принял"):
+    row = db.execute(
+        "SELECT value FROM settings WHERE chat_id=42 AND field=?", (field,)
+    ).fetchone()
+    assert row and row[0] == "Иванов Иван Иванович", (field, row)
+print("ok: grouped settings saved to SQLite for both fields")
 
 calls = [json.loads(line)["method"] for line in open(os.environ["LOG_FILE"], encoding="utf-8")]
 for method in ("answerCallbackQuery", "sendMessage", "getFile", "sendDocument", "editMessageText"):
@@ -70,9 +71,11 @@ print("ok: Bot API calls:", ", ".join(dict.fromkeys(calls)))
 doc = fitz.open(os.environ["SENT_FILE"])
 widgets = {w.field_name: w.field_value for w in doc[0].widgets()}
 assert len(widgets) == 5, widgets
-assert widgets["Автомобиль"] == "BMW X5 A123BC", widgets
-assert widgets["Сдал грузоотправитель"] == "ИП Кабак Сергей Анатольевич", widgets
-print("ok: returned PDF has 5 fields and correct values")
+assert widgets["Водитель"] == "Иванов Иван Иванович", widgets
+assert widgets["Товар к перевозке принял"] == "Иванов Иван Иванович", widgets
+assert widgets["Автомобиль"] == "", widgets
+assert widgets["Сдал грузоотправитель"] == "", widgets
+print("ok: returned PDF has grouped values and no defaults")
 PY
 
 echo "ALL OK"

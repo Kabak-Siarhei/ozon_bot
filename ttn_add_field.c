@@ -99,9 +99,7 @@ static const char *DA_STRING = "/Helvetica 6 Tf 0 0 0 rg";
 /* Значение по умолчанию для поля (если пользователь не задал своё) */
 const char *ttn_default_value(const char *field)
 {
-    if (strcmp(field, "Отпуск разрешил") == 0 ||
-        strcmp(field, "Сдал грузоотправитель") == 0)
-        return "ИП Кабак Сергей Анатольевич";
+    (void)field;
     return "";
 }
 

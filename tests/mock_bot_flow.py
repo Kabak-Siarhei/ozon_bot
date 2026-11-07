@@ -23,7 +23,7 @@ UPDATES = [
         "callback_query": {
             "id": "cb1",
             "from": {"id": 1},
-            "data": "set:Автомобиль",
+            "data": "set:Водитель",
             "message": {
                 "message_id": 5,
                 "chat": {"id": 42, "type": "private"},
@@ -36,7 +36,7 @@ UPDATES = [
             "message_id": 6,
             "chat": {"id": 42, "type": "private"},
             "from": {"id": 1},
-            "text": "BMW X5 A123BC",
+            "text": "Иванов Иван Иванович",
         },
     },
     {

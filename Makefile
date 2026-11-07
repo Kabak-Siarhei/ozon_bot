@@ -22,7 +22,7 @@ PKG_LIBS   := $(shell pkg-config --libs libcurl sqlite3 2>/dev/null)
 
 LDLIBS = $(MUPDF_LIBS) $(PKG_LIBS) -lm $(SYS_LIBS) $(EXTRA_LIBS)
 
-BOT_SRCS = bot.c telegram.c db.c ui.c ttn_add_field.c ttn_config.c cJSON.c
+BOT_SRCS = bot.c telegram.c db.c ui.c groups.c ttn_add_field.c ttn_config.c cJSON.c
 CFLAGS_ALL = $(CFLAGS) -I. -I"$(MUPDF_INC)" $(PKG_CFLAGS)
 
 .PHONY: all clean test test-core test-tg
@@ -35,8 +35,8 @@ ozon_bot: $(BOT_SRCS) *.h
 ttn_add_field: ttn_add_field.c ttn_config.c ttn_add_field.h ttn_config.h
 	$(CC) $(CFLAGS_ALL) -o $@ ttn_add_field.c ttn_config.c -L"$(MUPDF_LIB)" $(LDLIBS)
 
-test_core: tests/test_core.c db.c ui.c ttn_add_field.c ttn_config.c cJSON.c *.h
-	$(CC) $(CFLAGS_ALL) -DTTN_NO_MAIN -o $@ tests/test_core.c db.c ui.c \
+test_core: tests/test_core.c db.c ui.c groups.c ttn_add_field.c ttn_config.c cJSON.c *.h
+	$(CC) $(CFLAGS_ALL) -DTTN_NO_MAIN -o $@ tests/test_core.c db.c ui.c groups.c \
 	    ttn_add_field.c ttn_config.c cJSON.c -L"$(MUPDF_LIB)" $(LDLIBS)
 
 test_tg: tests/test_tg.c telegram.c cJSON.c *.h

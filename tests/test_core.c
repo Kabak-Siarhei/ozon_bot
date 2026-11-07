@@ -11,6 +11,7 @@
 
 #include "cJSON.h"
 #include "db.h"
+#include "groups.h"
 #include "ttn_add_field.h"
 #include "ui.h"
 
@@ -64,9 +65,16 @@ int main(void)
     text = ui_settings_text(db, 42);
     CHECK(text && strstr(text, "Автомобиль: BMW X5 A123BC") != NULL,
           "settings text has stored value");
-    CHECK(text && strstr(text, "Сдал грузоотправитель: ИП Кабак Сергей Анатольевич") != NULL,
-          "settings text has default value");
+    CHECK(text && strstr(text, "Отпуск разрешил / Сдал грузоотправитель: —") != NULL,
+          "settings text has no default value");
     free(text);
+
+    {
+        const field_group_t *g = field_group_for("Водитель");
+        CHECK(g != NULL && g->count == 2, "driver group found");
+        CHECK(g && strcmp(g->fields[1], "Товар к перевозке принял") == 0,
+              "driver group contains cargo field");
+    }
 
     kb = ui_settings_keyboard(db, 42);
     CHECK(kb != NULL, "settings keyboard built");

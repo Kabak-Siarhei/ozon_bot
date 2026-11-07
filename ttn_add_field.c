@@ -198,7 +198,7 @@ static pdf_obj *get_or_create_acroform(fz_context *ctx, pdf_document *doc)
         pdf_dict_puts_drop(ctx, acroform, "Fields", fields_arr);
         fields_arr = NULL;
 
-        pdf_dict_put_bool(ctx, acroform, pdf_new_name(ctx, "NeedAppearances"), 1);
+        pdf_dict_put_bool(ctx, acroform, pdf_new_name(ctx, "NeedAppearances"), 0);
 
         acroform = pdf_add_object_drop(ctx, doc, acroform);
 
@@ -344,7 +344,7 @@ static void add_text_field(fz_context *ctx, pdf_document *doc,
 
         pdf_array_push_drop(ctx, fields_arr, pdf_keep_obj(ctx, annot_dict));
 
-        pdf_dict_put_bool(ctx, acroform, pdf_new_name(ctx, "NeedAppearances"), 1);
+        pdf_dict_put_bool(ctx, acroform, pdf_new_name(ctx, "NeedAppearances"), 0);
 
         pdf_drop_obj(ctx, acroform);
         pdf_drop_widget(ctx, widget);
@@ -415,7 +415,13 @@ int process_pdf_file(const char *in_path, const char *out_path,
 
         add_ttn_fields(ctx, doc, page, page_height, cfg);
 
-        pdf_save_document(ctx, doc, out_path, NULL);
+        {
+            /* do_appearance=2: сгенерировать /AP для полей, чтобы значения
+             * отображались во всех просмотрщиках, а не только по NeedAppearances. */
+            pdf_write_options opts = pdf_default_write_options;
+            opts.do_appearance = 2;
+            pdf_save_document(ctx, doc, out_path, &opts);
+        }
 
         result = EXIT_SUCCESS;
     }
@@ -465,7 +471,11 @@ int process_pdf_file_single(const char *in_path, const char *out_path,
                        field_name, field_value,
                        x0, y0, x1, y1);
 
-        pdf_save_document(ctx, doc, out_path, NULL);
+        {
+            pdf_write_options opts = pdf_default_write_options;
+            opts.do_appearance = 2;
+            pdf_save_document(ctx, doc, out_path, &opts);
+        }
         result = EXIT_SUCCESS;
     }
     fz_catch(ctx) {

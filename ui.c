@@ -1,5 +1,5 @@
 /*
- * ui.c — тексты и клавиатура меню настроек (с группами полей).
+ * ui.c — тексты и клавиатура меню настроек (5 отдельных полей).
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "groups.h"
+#include "ttn_add_field.h"
 
 typedef struct {
     char *data;
@@ -44,7 +44,6 @@ static int sb_append(sbuf *b, const char *s)
     return 0;
 }
 
-/* Длина UTF-8 символа по ведущему байту. */
 static size_t utf8_char_len(unsigned char c)
 {
     if ((c & 0x80) == 0)
@@ -94,36 +93,30 @@ static char *utf8_shorten(const char *s, size_t max)
         if (!out)
             return NULL;
         memcpy(out, s, cut);
-        memcpy(out + cut, "…", 4); /* «…» + NUL */
+        memcpy(out + cut, "…", 4);
         return out;
     }
 }
 
-/* Значение группы: первое сохранённое поле, иначе пустая строка. */
-static char *group_value(db_t *db, long long chat_id,
-                         const field_group_t *group)
+/* Сохранённое значение поля, иначе пустая строка (дефолтов нет). */
+static char *field_value(db_t *db, long long chat_id, const char *field)
 {
-    for (int i = 0; i < group->count; i++) {
-        char *stored = NULL;
-        int rc;
+    char *stored = NULL;
+    int rc = db_get_value(db, chat_id, field, &stored);
 
-        if (!group->fields[i])
-            continue;
-        rc = db_get_value(db, chat_id, group->fields[i], &stored);
-        if (rc == 1)
-            return stored;
-        free(stored);
-    }
+    if (rc == 1)
+        return stored;
+    free(stored);
     return strdup("");
 }
 
 char *ui_help(void)
 {
-    const field_group_t *groups;
+    const ttn_field_t *fields;
     size_t count = 0;
     sbuf b = {0};
 
-    groups = field_groups(&count);
+    fields = ttn_fields(&count);
 
     sb_append(&b,
         "🤖 Я обрабатываю PDF-документы и добавляю поля в бланки (ТТН).\n"
@@ -139,8 +132,8 @@ char *ui_help(void)
 
     for (size_t i = 0; i < count; i++) {
         if (i)
-            sb_append(&b, "; ");
-        sb_append(&b, groups[i].label);
+            sb_append(&b, ", ");
+        sb_append(&b, fields[i].name);
     }
     sb_append(&b, ".");
 
@@ -149,18 +142,18 @@ char *ui_help(void)
 
 char *ui_settings_text(db_t *db, long long chat_id)
 {
-    const field_group_t *groups;
+    const ttn_field_t *fields;
     size_t count = 0;
     sbuf b = {0};
     char line[1024];
 
-    groups = field_groups(&count);
+    fields = ttn_fields(&count);
 
     sb_append(&b, "⚙️ Настройки полей\n\n");
 
     for (size_t i = 0; i < count; i++) {
-        char *value = group_value(db, chat_id, &groups[i]);
-        snprintf(line, sizeof(line), "• %s: %s\n", groups[i].label,
+        char *value = field_value(db, chat_id, fields[i].name);
+        snprintf(line, sizeof(line), "• %s: %s\n", fields[i].name,
                  (value && *value) ? value : "—");
         sb_append(&b, line);
         free(value);
@@ -168,7 +161,6 @@ char *ui_settings_text(db_t *db, long long chat_id)
 
     sb_append(&b,
         "\nНажмите поле, чтобы изменить значение, ✖ — чтобы очистить.\n"
-        "Поля через «/» заполняются одним значением.\n"
         "Когда настроите — отправьте PDF-документ.");
 
     return b.data;
@@ -176,7 +168,7 @@ char *ui_settings_text(db_t *db, long long chat_id)
 
 cJSON *ui_settings_keyboard(db_t *db, long long chat_id)
 {
-    const field_group_t *groups;
+    const ttn_field_t *fields;
     size_t count = 0;
     cJSON *kb = cJSON_CreateObject();
     cJSON *rows;
@@ -190,20 +182,19 @@ cJSON *ui_settings_keyboard(db_t *db, long long chat_id)
         return NULL;
     }
 
-    groups = field_groups(&count);
+    fields = ttn_fields(&count);
 
     for (size_t i = 0; i < count; i++) {
-        char *value = group_value(db, chat_id, &groups[i]);
+        char *value = field_value(db, chat_id, fields[i].name);
         char label[1024];
         char set_data[192];
         char clr_data[192];
         char *short_label;
-        const char *canonical = groups[i].fields[0];
         cJSON *row;
         cJSON *btn_set;
         cJSON *btn_clr;
 
-        snprintf(label, sizeof(label), "%s: %s", groups[i].label,
+        snprintf(label, sizeof(label), "%s: %s", fields[i].name,
                  (value && *value) ? value : "не задано");
         free(value);
 
@@ -211,8 +202,8 @@ cJSON *ui_settings_keyboard(db_t *db, long long chat_id)
         if (!short_label)
             short_label = strdup("");
 
-        snprintf(set_data, sizeof(set_data), "set:%s", canonical);
-        snprintf(clr_data, sizeof(clr_data), "clr:%s", canonical);
+        snprintf(set_data, sizeof(set_data), "set:%s", fields[i].name);
+        snprintf(clr_data, sizeof(clr_data), "clr:%s", fields[i].name);
 
         row = cJSON_CreateArray();
         btn_set = cJSON_CreateObject();

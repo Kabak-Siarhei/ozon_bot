@@ -23,7 +23,6 @@
 
 #include "cJSON.h"
 #include "db.h"
-#include "groups.h"
 #include "telegram.h"
 #include "ttn_add_field.h"
 #include "ttn_config.h"
@@ -192,73 +191,24 @@ static int is_pdf_document(cJSON *doc)
     return has_suffix_ci(name, ".pdf");
 }
 
-static void db_set_group(db_t *db, long long chat_id,
-                         const field_group_t *group, const char *value)
-{
-    for (int i = 0; i < group->count; i++) {
-        if (group->fields[i])
-            db_set(db, chat_id, group->fields[i], value);
-    }
-}
-
-static void db_clear_group(db_t *db, long long chat_id,
-                           const field_group_t *group)
-{
-    for (int i = 0; i < group->count; i++) {
-        if (group->fields[i])
-            db_clear(db, chat_id, group->fields[i]);
-    }
-}
-
-static void cfg_set(ttn_config_t *cfg, const char *name, const char *value)
-{
-    for (int i = 0; i < cfg->count; i++) {
-        if (strcmp(cfg->entries[i].name, name) == 0) {
-            snprintf(cfg->entries[i].value, sizeof(cfg->entries[i].value),
-                     "%s", value);
-            cfg->entries[i].has_value = 1;
-            return;
-        }
-    }
-    if (cfg->count < MAX_FIELDS) {
-        ttn_field_entry_t *e = &cfg->entries[cfg->count++];
-        snprintf(e->name, sizeof(e->name), "%s", name);
-        snprintf(e->value, sizeof(e->value), "%s", value);
-        e->has_value = 1;
-    }
-}
-
-/* Старые данные могли содержать значение только в одном поле группы. */
-static void normalize_group_values(ttn_config_t *cfg)
-{
-    size_t count = 0;
-    const field_group_t *groups = field_groups(&count);
-
-    for (size_t i = 0; i < count; i++) {
-        const char *value = NULL;
-
-        if (groups[i].count < 2)
-            continue;
-
-        for (int j = 0; j < groups[i].count; j++) {
-            const char *v = config_get_value(cfg, groups[i].fields[j]);
-            if (v) {
-                value = v;
-                break;
-            }
-        }
-
-        if (value) {
-            for (int j = 0; j < groups[i].count; j++)
-                cfg_set(cfg, groups[i].fields[j], value);
-        }
-    }
-}
-
 static const char *chat_type(cJSON *message)
 {
     cJSON *chat = json_obj(message, "chat");
     return json_str(chat, "type");
+}
+
+static int field_is_known(const char *name)
+{
+    const ttn_field_t *fields;
+    size_t count = 0;
+    if (!name)
+        return 0;
+    fields = ttn_fields(&count);
+    for (size_t i = 0; i < count; i++) {
+        if (strcmp(fields[i].name, name) == 0)
+            return 1;
+    }
+    return 0;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -346,15 +296,10 @@ static void handle_text(bot_t *bot, cJSON *message, long long chat_id,
 
     if (db_take_pending(bot->db, chat_id, user_id, &p) == 1) {
         char confirm[2048];
-        const field_group_t *group = field_group_for(p.field);
 
-        if (group)
-            db_set_group(bot->db, chat_id, group, text);
-        else
-            db_set(bot->db, chat_id, p.field, text);
-
+        db_set(bot->db, chat_id, p.field, text);
         snprintf(confirm, sizeof(confirm), "✅ «%s» сохранено: %s",
-                 group ? group->label : p.field, text);
+                 p.field, text);
         edit_or_send(bot, chat_id, p.prompt_message_id, confirm);
         if (p.menu_message_id > 0)
             refresh_menu(bot, chat_id, p.menu_message_id);
@@ -437,7 +382,6 @@ static void handle_document(bot_t *bot, cJSON *message, long long chat_id,
     free(remote_path);
 
     db_load_config(bot->db, chat_id, &cfg);
-    normalize_group_values(&cfg);
 
     if (process_pdf_file(in_path, out_path, &cfg) != 0) {
         edit_or_send(bot, chat_id, (int)status_id,
@@ -506,40 +450,38 @@ static void handle_callback(bot_t *bot, cJSON *query)
 
     if (has_prefix(data, "set:")) {
         const char *field = data + 4;
-        const field_group_t *group = field_group_for(field);
-        char prompt[1024];
+        char prompt[512];
         long long prompt_id = 0;
 
-        if (!group) {
+        if (!field_is_known(field)) {
             tg_answer_callback(bot->tg, id, NULL);
             return;
         }
 
         snprintf(prompt, sizeof(prompt),
-                 "Введите значение для «%s»", group->label);
+                 "Введите значение для «%s»", field);
         tg_answer_callback(bot->tg, id, prompt);
 
         snprintf(prompt, sizeof(prompt),
                  "✏️ Отправьте новое значение для «%s» текстом.\n"
                  "Отмена — /cancel",
-                 group->label);
+                 field);
         if (tg_send_message(bot->tg, chat_id, prompt, NULL, &prompt_id) == 0) {
-            db_set_pending(bot->db, chat_id, user_id, group->fields[0],
-                           (int)prompt_id, message_id);
+            db_set_pending(bot->db, chat_id, user_id, field, (int)prompt_id,
+                           message_id);
         }
         return;
     }
 
     if (has_prefix(data, "clr:")) {
         const char *field = data + 4;
-        const field_group_t *group = field_group_for(field);
 
-        if (!group) {
+        if (!field_is_known(field)) {
             tg_answer_callback(bot->tg, id, NULL);
             return;
         }
 
-        db_clear_group(bot->db, chat_id, group);
+        db_clear(bot->db, chat_id, field);
         tg_answer_callback(bot->tg, id, "Очищено ✅");
         refresh_menu(bot, chat_id, message_id);
         return;
